@@ -70,12 +70,12 @@ def plot_range(endpoint, prefix):
 	span = now_ts - times[0].timestamp()
 
 	roll_points = ROLLING_POINTS
-	if span < 3600:
+	if span <= 3600:
 		roll_points = 12    # 1-min rolling
-	elif span < 86400:
-		roll_points = 12    # 5-min rolling
+	elif span <= 86400:
+		roll_points = 60    # 5-min rolling
 	else:
-		roll_points = 288   # 1-day rolling
+		roll_points = 360   # 30-min rolling
 
 	for key, label in [
 		("cpu_percent", "CPU %"),

@@ -11,9 +11,14 @@ os.makedirs(PLOTS_DIR, exist_ok=True)
 ROLLING_POINTS = 12
 
 def fetch_metrics(endpoint):
+	print(f"Fetching metrics from {BASE_URL}/{endpoint}...")
 	url = f"{BASE_URL}/{endpoint}"
 	resp = requests.get(url)
 	resp.raise_for_status()
+	if resp.status_code != 200:
+		raise Exception(f"Failed to fetch metrics: {resp.status_code} {resp.text}")
+	else:   
+		print(f"Successfully fetched metrics from {url}")
 	return resp.json()
 
 def parse_metric_data(raw):

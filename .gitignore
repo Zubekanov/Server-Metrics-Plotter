@@ -1,3 +1,7 @@
+# Ignore plot files and folder
+*.png
+plots
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

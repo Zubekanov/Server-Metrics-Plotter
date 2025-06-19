@@ -2,26 +2,24 @@ import os
 import time
 import requests
 from datetime import datetime
+import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
 BASE_URL = "http://zubekanov.com/api"
 PLOTS_DIR = os.path.join(os.path.dirname(__file__), "plots")
 os.makedirs(PLOTS_DIR, exist_ok=True)
-ROLLING_POINTS = 12
 
-def fetch_metrics(endpoint):
-	print(f"Fetching metrics from {BASE_URL}/{endpoint}...")
+def fetch_metrics(endpoint: str, params: dict = None):
+	print(f"Fetching metrics from {BASE_URL}/{endpoint} with params={params}...")
 	url = f"{BASE_URL}/{endpoint}"
-	resp = requests.get(url)
+	resp = requests.get(url, params=params)
 	resp.raise_for_status()
-	if resp.status_code != 200:
-		raise Exception(f"Failed to fetch metrics: {resp.status_code} {resp.text}")
-	else:   
-		print(f"Successfully fetched metrics from {url}")
+	print(f"→ {resp.status_code} OK")
 	return resp.json()
 
-def parse_metric_data(raw):
+
+def parse_metric_data(raw: dict):
 	parsed = {k: [] for k in raw}
 	times = set()
 	for key, items in raw.items():
@@ -31,24 +29,18 @@ def parse_metric_data(raw):
 			times.add(ts)
 	return sorted(times), parsed
 
-def compute_rolling(times, values, points):
-	roll_times = []
-	roll_vals = []
-	for i in range(len(times)):
-		start = max(0, i - points + 1)
-		window_vals = values[start:i+1]
-		roll_times.append(times[i])
-		roll_vals.append(sum(window_vals) / len(window_vals))
-	return roll_times, roll_vals
 
-def plot_single_metric(times, values, roll_times, roll_vals, filename, ylabel, title):
+def plot_single_metric(times, values, filename, ylabel, title):
 	fig, ax = plt.subplots(figsize=(10, 4))
-	ax.plot(times, values, label="Raw", alpha=0.5, linewidth=1)
-	if roll_times and roll_vals:
-		ax.plot(roll_times, roll_vals, linestyle="--", label="Rolling Avg")
-		ax.legend()
+
+	# plot raw values with gaps for missing data
+	vals_arr = np.array(values, dtype=float)
+	masked_raw = np.ma.masked_invalid(vals_arr)
+	ax.plot(times, masked_raw, label="Raw", alpha=0.5, linewidth=1)
+
 	ax.set_ylabel(ylabel)
 	ax.set_title(title)
+
 	span_days = (times[-1] - times[0]).days
 	if span_days < 1:
 		fmt = mdates.DateFormatter("%H:%M")
@@ -58,29 +50,31 @@ def plot_single_metric(times, values, roll_times, roll_vals, filename, ylabel, t
 		fmt = mdates.DateFormatter("%Y %b %d")
 	ax.xaxis.set_major_formatter(fmt)
 	fig.autofmt_xdate(rotation=30, ha="right")
+
 	plt.tight_layout()
 	plt.savefig(filename)
 	plt.close(fig)
 	print(f"Saved plot: {filename}")
 
-def plot_range(endpoint, prefix):
-	data = fetch_metrics(endpoint)
+
+def plot_timestamp_range(prefix: str, start: int = None, stop: int = None, step: int = 5):
+	"""
+	Fetch from /api/timestamp_metrics?start=...&stop=...&step=...
+	and plot cpu_percent, ram_used, disk_used, cpu_temp without rolling averages.
+	"""
+	params = {}
+	if start is not None:
+		params["start"] = int(start)
+	if stop is not None:
+		params["stop"] = int(stop)
+	if step is not None:
+		params["step"] = int(step)
+
+	data = fetch_metrics("timestamp_metrics", params=params)
 	times, parsed = parse_metric_data(data)
-
 	if not times:
-		print(f"No data for {prefix}.")
+		print(f"No data for {prefix}")
 		return
-
-	now_ts = time.time()
-	span = now_ts - times[0].timestamp()
-
-	roll_points = ROLLING_POINTS
-	if span <= 3600:
-		roll_points = 12    # 1-min rolling
-	elif span <= 86400:
-		roll_points = 60    # 5-min rolling
-	else:
-		roll_points = 360   # 30-min rolling
 
 	for key, label in [
 		("cpu_percent", "CPU %"),
@@ -88,14 +82,19 @@ def plot_range(endpoint, prefix):
 		("disk_used", "Disk Used (GiB)"),
 		("cpu_temp", "CPU Temp (°C)")
 	]:
-		entries = parsed[key]
-		vals = [v for _, v in entries]
-		ts   = [t for t, _ in entries]
-		roll_t, roll_v = compute_rolling(ts, vals, roll_points)
+		# align values to full timeline, inserting NaN for missing
+		value_map = {t: v for t, v in parsed.get(key, [])}
+		aligned_vals = [value_map.get(t, float('nan')) for t in times]
+
 		filename = os.path.join(PLOTS_DIR, f"{prefix}_{key}.png")
 		title = f"{label} ({prefix.replace('_', ' ').title()})"
-		plot_single_metric(ts, vals, roll_t, roll_v, filename, label, title)
+		plot_single_metric(times, aligned_vals, filename, label, title)
 
 if __name__ == "__main__":
-	plot_range("hour_metrics", "last_hour")
-	plot_range("compressed_metrics", "all_data")
+	now = int(time.time())
+
+	# Last-hour defaults
+	plot_timestamp_range("last_hour")
+
+	# Full history, sampled hourly
+	plot_timestamp_range("all", start=0, stop=now, step=3600)
